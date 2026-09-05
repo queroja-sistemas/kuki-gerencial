@@ -732,7 +732,7 @@
   
     /* CRUD módulos */
     .crud-form-box{margin:20px 0;padding:18px;border:1px solid #ead7c7;border-radius:16px;background:#fffaf6}
-    .crud-form-box h3{margin-bottom:14px}.crud-field{display:flex;flex-direction:column;gap:6px;margin-bottom:12px;font-weight:700}.crud-field input{padding:12px;border:1px solid #d9c8bb;border-radius:10px;font:inherit}.check-field{flex-direction:row;align-items:center}.crud-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}.actions-inline{display:flex;gap:8px;align-items:center;justify-content:flex-start;flex-wrap:nowrap}.actions-inline button{margin:0!important;min-width:92px}.crud-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px 16px}.crud-grid .crud-field{margin-bottom:0}
+    .crud-form-box h3{margin-bottom:14px}.crud-field{display:flex;flex-direction:column;gap:6px;margin-bottom:12px;font-weight:700}.crud-field input,.crud-field select{padding:12px;border:1px solid #d9c8bb;border-radius:10px;font:inherit;background:#fff;color:inherit}.check-field{flex-direction:row;align-items:center}.crud-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}.actions-inline{display:flex;gap:8px;align-items:center;justify-content:flex-start;flex-wrap:nowrap}.actions-inline button{margin:0!important;min-width:92px}.crud-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px 16px}.crud-grid .crud-field{margin-bottom:0}
     @media(max-width:700px){.actions-inline{gap:6px}.actions-inline button{min-width:0;padding:9px 8px;font-size:12px}.crud-grid{grid-template-columns:1fr}}
 
     .dashboard-card-action{
@@ -1153,6 +1153,10 @@
 
         <button onclick="selectMenu(this, 'Horários')">
           <span>🕐</span> Horários
+        </button>
+
+        <button onclick="selectMenu(this, 'Cupons')">
+          <span>🎟️</span> Cupons
         </button>
 
         <button onclick="selectMenu(this, 'Relatórios')">
@@ -3745,8 +3749,14 @@
       'Produtos': { table:'PRODUTOS', icon:'🍪', fields:['NOME','DESCRICAO','PRECO','ATIVO'] },
       'Clientes': { table:'CLIENTES', icon:'👥', fields:['NOME','TELEFONE','WHATSAPP','CEP','ENDERECO','NUMERO','COMPLEMENTO','BAIRRO','CIDADE'] },
       'Formas de pagamento': { table:'FORMAS_PAGAMENTO', icon:'💳', fields:['NOME','ATIVO'] },
-      'Formas de entrega': { table:'FORMAS_ENTREGA', icon:'🛵', fields:['NOME','VALOR','ATIVO'] }
+      'Formas de entrega': { table:'FORMAS_ENTREGA', icon:'🛵', fields:['NOME','VALOR','ATIVO'] },
+      'Cupons': { table:'CUPONS', icon:'🎟️', fields:['CODIGO','TIPO_DESCONTO','VALOR_DESCONTO','ATIVO','OBSERVACAO'] }
     };
+
+    const TIPO_DESCONTO_OPCOES = [
+      { value:'PERCENTUAL', label:'Percentual (%)' },
+      { value:'VALOR_FIXO', label:'Valor fixo (R$)' }
+    ];
 
     const KUKI_STORAGE_BUCKET = 'produtos';
     const MAX_PRODUTO_IMAGEM_BYTES = 5 * 1024 * 1024;
@@ -3754,9 +3764,11 @@
 
     function normKey(k){ return String(k||'').toUpperCase(); }
     function prettyField(k){ return String(k).replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()); }
-    function isSystemField(k){ return ['ID','CREATED_AT','UPDATED_AT'].includes(normKey(k)); }
-    function isBoolField(k){ return ['ATIVO','ABERTO','DISPONIVEL','HABILITADO'].includes(normKey(k)); }
+    function isSystemField(k){ return ['ID','CREATED_AT','UPDATED_AT','CRIADO_EM'].includes(normKey(k)); }
+    function isBoolField(k){ return ['ATIVO','ABERTO','DISPONIVEL','HABILITADO','USADO'].includes(normKey(k)); }
     function isNumberField(k){ return ['PRECO','VALOR','TOTAL','TAXA','ESTOQUE','QUANTIDADE'].some(x=>normKey(k).includes(x)); }
+    function isSelectField(k){ return normKey(k)==='TIPO_DESCONTO'; }
+    function selectOptionsFor(k){ return isSelectField(k) ? TIPO_DESCONTO_OPCOES : []; }
     function isImageField(k){ const n=normKey(k); return n.includes('IMAGEM') || n.includes('FOTO') || n.includes('IMAGE') || n.includes('PICTURE'); }
     function encontrarCampoImagem(fields){ return (fields||[]).find(isImageField) || null; }
 
@@ -3783,9 +3795,38 @@
           '<label class="product-image-remove"><input type="checkbox" name="__remover_imagem__"> Remover a foto atual</label>'+
           '</div></label>';
       }
+      if(isSelectField(f)){
+        const opts=selectOptionsFor(f).map(o=>'<option value="'+escapeHtml(o.value)+'">'+escapeHtml(o.label)+'</option>').join('');
+        return '<label class="crud-field">'+escapeHtml(prettyField(f))+'<select name="'+escapeHtml(f)+'"><option value="">Selecione</option>'+opts+'</select></label>';
+      }
       const type=isBoolField(f)?'checkbox':(isNumberField(f)?'number':'text');
       const step=isNumberField(f)?' step="0.01"':'';
-      return type==='checkbox'?'<label class="crud-field check-field"><input type="checkbox" name="'+escapeHtml(f)+'" checked> '+escapeHtml(prettyField(f))+'</label>':'<label class="crud-field">'+escapeHtml(prettyField(f))+'<input'+step+' type="'+type+'" name="'+escapeHtml(f)+'"></label>';
+      const styleExtra=normKey(f)==='CODIGO'?' style="text-transform:uppercase"':'';
+      return type==='checkbox'?'<label class="crud-field check-field"><input type="checkbox" name="'+escapeHtml(f)+'" checked> '+escapeHtml(prettyField(f))+'</label>':'<label class="crud-field">'+escapeHtml(prettyField(f))+'<input'+step+styleExtra+' type="'+type+'" name="'+escapeHtml(f)+'"></label>';
+    }
+
+    function pedidosDoCupom(codigo){
+      const alvo=String(codigo||'').trim().toUpperCase(); if(!alvo)return[];
+      return (Array.isArray(pedidosCache)?pedidosCache:[]).filter(p=>{
+        const c=getValue(p,['CUPOM_CODIGO','cupom_codigo'],'');
+        return String(c||'').trim().toUpperCase()===alvo;
+      });
+    }
+
+    function formatCrudCellValue(k,r){
+      const v=r[k];
+      if(isSelectField(k)){
+        const opt=selectOptionsFor(k).find(o=>o.value===v);
+        return opt?opt.label:(v??'');
+      }
+      if(normKey(k)==='VALOR_DESCONTO'){
+        const tipoKey=Object.keys(r).find(kk=>normKey(kk)==='TIPO_DESCONTO');
+        const tipo=tipoKey?r[tipoKey]:'';
+        const num=Number(v);
+        if(isNaN(num))return v??'';
+        return tipo==='PERCENTUAL'?(num+'%'):('R$ '+num.toFixed(2).replace('.',','));
+      }
+      return isBoolField(k)?(v?'Sim':'Não'):(v??'');
     }
 
     async function renderCrudModule(name){
@@ -3794,9 +3835,19 @@
       let rows=[],loadError=''; try{rows=await carregarCrud(name)}catch(e){loadError='Não foi possível carregar '+cfg.table+': '+(e.message||'erro desconhecido')}
       const fields=crudFields(name,rows), imageField=name==='Produtos'?encontrarCampoImagem(fields):null;
       const cols=rows.length?Object.keys(rows[0]).filter(k=>!isSystemField(k)):fields;
+      const cupomExtra=name==='Cupons';
       const form=fields.map(f=>renderCampoCrud(f,imageField)).join('');
-      const header=cols.map(k=>'<th>'+escapeHtml(prettyField(k))+'</th>').join('');
-      const body=rows.length?rows.map((r,i)=>'<tr>'+cols.map(k=>'<td>'+((imageField&&normKey(k)===normKey(imageField))?renderImagemCelula(r[k]):escapeHtml(isBoolField(k)?(r[k]?'Sim':'Não'):(r[k]??'')))+'</td>').join('')+'<td><div class="actions-inline"><button type="button" class="secondary-button" data-crud-action="edit" data-crud-name="'+escapeHtml(name)+'" data-crud-index="'+i+'">✏️ Editar</button><button type="button" class="danger-button" data-crud-action="delete" data-crud-name="'+escapeHtml(name)+'" data-crud-index="'+i+'">🗑 Excluir</button></div></td></tr>').join(''):'<tr><td colspan="'+(cols.length+1)+'">Nenhum registro encontrado. Clique em Novo para cadastrar.</td></tr>';
+      const header=cols.map(k=>'<th>'+escapeHtml(prettyField(k))+'</th>').join('')+(cupomExtra?'<th>Pedido(s) que usaram</th>':'');
+      const body=rows.length?rows.map((r,i)=>{
+        const celulaExtra=cupomExtra?(()=>{
+          const codigoKey=Object.keys(r).find(k=>normKey(k)==='CODIGO');
+          const pedidos=pedidosDoCupom(codigoKey?r[codigoKey]:'');
+          if(!pedidos.length)return '<td style="color:var(--cinza);">—</td>';
+          const lista=pedidos.map(p=>'#'+escapeHtml(String(getValue(p,['NUMERO_PEDIDO','numero_pedido'],getPedidoId(p))))).join(', ');
+          return '<td>'+lista+'</td>';
+        })():'';
+        return '<tr>'+cols.map(k=>'<td>'+((imageField&&normKey(k)===normKey(imageField))?renderImagemCelula(r[k]):escapeHtml(String(formatCrudCellValue(k,r))))+'</td>').join('')+celulaExtra+'<td><div class="actions-inline"><button type="button" class="secondary-button" data-crud-action="edit" data-crud-name="'+escapeHtml(name)+'" data-crud-index="'+i+'">✏️ Editar</button><button type="button" class="danger-button" data-crud-action="delete" data-crud-name="'+escapeHtml(name)+'" data-crud-index="'+i+'">🗑 Excluir</button></div></td></tr>';
+      }).join(''):'<tr><td colspan="'+(cols.length+1+(cupomExtra?1:0))+'">Nenhum registro encontrado. Clique em Novo para cadastrar.</td></tr>';
       const avisoImagem=name==='Produtos'?(imageField?'<p style="margin-top:8px;color:var(--cinza);font-size:12px;">📷 Fotos armazenadas no Supabase Storage. O campo <strong>'+escapeHtml(imageField)+'</strong> guarda a URL da imagem.</p>':'<p style="margin-top:8px;color:#a20c23;font-size:12px;">⚠️ Não foi identificado automaticamente um campo de foto/imagem na tabela PRODUTOS. Crie um campo com nome contendo FOTO ou IMAGEM.</p>'):'';
       c.innerHTML='<div class="module-panel"><div class="module-toolbar"><div><h2>'+cfg.icon+' '+escapeHtml(name)+'</h2><p style="color:var(--cinza);margin-top:6px;">Visualize, cadastre, edite ou exclua informações.</p>'+avisoImagem+'</div><div class="actions-inline"><button class="primary-button" data-crud-action="new" data-crud-name="'+escapeHtml(name)+'">＋ Novo</button><button class="secondary-button" data-crud-action="refresh" data-crud-name="'+escapeHtml(name)+'">↻ Atualizar</button></div></div>'+(loadError?'<p style="color:#a20c23">'+escapeHtml(loadError)+'</p>':'')+'<div id="crudFormBox" class="crud-form-box" style="display:none"><h3 id="crudFormTitle">Novo cadastro</h3><form id="crudForm"><div class="crud-grid">'+form+'</div><div class="crud-actions"><button type="submit" class="primary-button">💾 Salvar</button><button type="button" class="secondary-button" data-crud-action="cancel">Cancelar</button></div></form></div><div class="table-wrap"><table class="data-table"><thead><tr>'+header+'<th>Ações</th></tr></thead><tbody>'+body+'</tbody></table></div></div>';
       const f=document.getElementById('crudForm');
@@ -3850,6 +3901,7 @@
       const obj={};Array.from(form.elements).forEach(el=>{
         if(!el.name || el.name.startsWith('__'))return;
         let v=el.type==='checkbox'?el.checked:el.value.trim();
+        if(typeof v==='string' && normKey(el.name)==='CODIGO') v=v.toUpperCase();
         if(v!==''||el.type==='checkbox')obj[el.name]=isNumberField(el.name)&&v!==''?Number(String(v).replace(',','.')):v;
       });return obj;
     }
@@ -3878,7 +3930,11 @@
         if (!chaveReal || isSystemField(chaveReal)) return;
         let valor;
         if (el.type === 'checkbox') valor = !!el.checked;
-        else { valor = el.value.trim(); if (isNumberField(chaveReal) && valor !== '') valor = Number(String(valor).replace(',', '.')); }
+        else {
+          valor = el.value.trim();
+          if (normKey(chaveReal) === 'CODIGO') valor = valor.toUpperCase();
+          if (isNumberField(chaveReal) && valor !== '') valor = Number(String(valor).replace(',', '.'));
+        }
         payload[chaveReal] = valor;
       });
       return payload;
@@ -4646,7 +4702,8 @@
       'horarios':'Horários',
       'configuracoes':'Configurações',
       'analises':'Análises',
-      'relatorios':'Relatórios'
+      'relatorios':'Relatórios',
+      'cupons':'Cupons'
     };
     function moduleToRoute(name){
       return Object.keys(ROUTE_TO_MODULE).find(route => ROUTE_TO_MODULE[route]===name) || 'dashboard';
@@ -4715,7 +4772,7 @@
       const moduleContent = document.getElementById('moduleContent');
       document.getElementById('pageTitle').textContent = name;
       const subtitles = {
-        'Dashboard':'Visão geral da sua loja','Pedidos':'Acompanhe e gerencie todos os pedidos','Produtos':'Cadastre e gerencie os produtos da KUKI','Clientes':'Consulte os clientes cadastrados','Formas de pagamento':'Gerencie as opções de pagamento','Formas de entrega':'Gerencie as formas de entrega','Endereço Retirada':'Cadastre os endereços e defina o endereço ativo do dia','Horários':'Defina os horários de funcionamento da loja','Configurações':'Configurações gerais do sistema','Financeiro':'Acompanhe vendas, despesas e resultado financeiro','Análises':'Indicadores, tendências e inteligência da loja','Relatórios':'Relatórios exportáveis com os dados da sua loja'
+        'Dashboard':'Visão geral da sua loja','Pedidos':'Acompanhe e gerencie todos os pedidos','Produtos':'Cadastre e gerencie os produtos da KUKI','Clientes':'Consulte os clientes cadastrados','Formas de pagamento':'Gerencie as opções de pagamento','Formas de entrega':'Gerencie as formas de entrega','Endereço Retirada':'Cadastre os endereços e defina o endereço ativo do dia','Horários':'Defina os horários de funcionamento da loja','Configurações':'Configurações gerais do sistema','Financeiro':'Acompanhe vendas, despesas e resultado financeiro','Análises':'Indicadores, tendências e inteligência da loja','Relatórios':'Relatórios exportáveis com os dados da sua loja','Cupons':'Cadastre cupons de desconto e acompanhe onde foram usados'
       };
       document.getElementById('pageSubtitle').textContent = subtitles[name] || '';
       if (name === 'Dashboard') { dashboard.style.display='block'; moduleContent.style.display='none'; atualizarDashboard(); return; }
